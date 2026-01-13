@@ -133,17 +133,79 @@ rules.
 #### Launch Files
 
 An example of the `ros_launch` macro can be found under `ros2_example_apps`.
-Please note the following limitations:
 
-- Exposing a Bazel package as a ROS package has not yet been done. Once that is
-  done, `launch_ros.actions.Node` / `<node/>` can be used.
-- For Python launch files, it is best to use `Rlocation` (as shown in the example)
-  so that the launch file can be run via `bazel run`, `bazel test`, and
-  `./bazel-bin` (directly).
-- For XML launch files, we need to (somehow) expose either ROS packages or
-  `Rlocation`. This needs to be done in a way that can be discovered by
-  [`Parser.load_launch_extensions`](https://github.com/ros2/launch/blob/698e979382877242621a0d633750fe96ff0c2bca/launch/launch/frontend/parser.py#L72-L87),
-  which may require care to do so correctly in Bazel.
+To use `launch_ros.actions.Node` in launch files, you must first expose your
+Bazel package as a ROS package using the `ros_package` rule. This registers
+executables in the ament index so they can be discovered by name.
+
+Additionally, you can install launch files into the package's share directory
+to use `ros2 launch <package> <file>` without requiring `workspace_name`.
+
+**Approach 1: Using ros_package with launch files (recommended)**
+
+```python
+load("@bazel_ros2_rules//lib:ros_package.bzl", "ros_package")
+
+ros_package(
+    name = "my_package",
+    package_name = "my_ros_package",
+    executables = {
+        ":my_binary": "my_node",
+    },
+    launch_files = ["launch/my_launch.py"],  # Typically in launch/ subdirectory
+    # Or for multiple files: glob(["launch/*.py", "launch/*.xml"])
+)
+
+ros_launch(
+    name = "my_launch",
+    package = "my_ros_package",        # Use package name
+    launch_file = "my_launch.py",       # Just the filename
+    data = [":my_package"],
+    # workspace_name no longer needed!
+)
+```
+
+**Directory structure:**
+```
+my_package/
+  launch/
+    my_launch.py
+    another_launch.xml
+  src/
+    my_node.cpp
+  BUILD.bazel
+```
+
+**Approach 2: Using full paths (legacy)**
+
+```python
+ros_launch(
+    name = "my_launch",
+    launch_file = "my_launch.py",
+    workspace_name = workspace_name,  # Required
+    data = [...],
+)
+```
+
+Then in your launch file:
+```python
+from launch_ros.actions import Node
+
+Node(package='my_ros_package', executable='my_node')
+```
+
+Please note the following:
+- The `ros_package` target must be included in the launch target's `data` attribute
+  for the package to be discoverable at runtime.
+- Launch files are typically stored in a `launch/` subdirectory and referenced as
+  `["launch/my_launch.py"]` or using glob patterns like `glob(["launch/*.py"])`
+- Launch files are installed using their basename (e.g., `launch/my_launch.py` becomes
+  `share/<package>/launch/my_launch.py`)
+- Package.xml is optional but recommended for full ROS 2 compliance.
+- When using `package` parameter in `ros_launch`, `workspace_name` is not required.
+- For XML launch files using `<node/>` tags, the same `ros_package` approach
+  applies. The package must be discoverable by
+  [`Parser.load_launch_extensions`](https://github.com/ros2/launch/blob/698e979382877242621a0d633750fe96ff0c2bca/launch/launch/frontend/parser.py#L72-L87).
 
 ### Metadata
 

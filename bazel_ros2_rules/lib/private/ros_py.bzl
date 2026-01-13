@@ -171,6 +171,20 @@ args = [ros2_bin, "launch", launch_file] + sys.argv[1:]
 os.execv(ros2_bin, args)
 """
 
+_LAUNCH_PKG_TEMPLATE = """
+import os
+import sys
+
+from python.runfiles import runfiles as runfiles_api
+
+assert __name__ == "__main__"
+runfiles = runfiles_api.Create()
+ros2_bin = runfiles.Rlocation("ros2/ros2")
+launch_file = os.path.basename({launch_file})
+args = [ros2_bin, "launch", {package}, launch_file] + sys.argv[1:]
+os.execv(ros2_bin, args)
+"""
+
 def _make_respath(relpath, workspace_name):
     repo = native.repository_name()
     if repo == "@":
@@ -190,6 +204,7 @@ def _make_respath(relpath, workspace_name):
 def ros_launch(
         name,
         launch_file,
+        package = None,
         args = [],
         data = [],
         deps = [],
@@ -200,11 +215,19 @@ def ros_launch(
         workspace_name = None,
         **kwargs):
     main = "{}_roslaunch_main.py".format(name)
-    launch_respath = _make_respath(launch_file, workspace_name)
 
-    content = _LAUNCH_PY_TEMPLATE.format(
-        launch_respath = repr(launch_respath),
-    )
+    if package:
+        # Use ros2 launch <package> <file>
+        content = _LAUNCH_PKG_TEMPLATE.format(
+            package = repr(package),
+            launch_file = repr(launch_file),
+        )
+    else:
+        # Use full path (legacy)
+        launch_respath = _make_respath(launch_file, workspace_name)
+        content = _LAUNCH_PY_TEMPLATE.format(
+            launch_respath = repr(launch_respath),
+        )
     _generate_file(
         name = main,
         content = content,
@@ -218,7 +241,10 @@ def ros_launch(
             REPOSITORY_ROOT + ":ros2",
         ],
     )
-    data = data + [launch_file]
+    # Only add launch_file to data if not using package-based approach
+    # (when using package, the file is provided by ros_package in data)
+    if not package:
+        data = data + [launch_file]
 
     if "tags" not in kwargs:
         kwargs["tags"] = []
