@@ -50,33 +50,12 @@ def _ros_package_impl(ctx):
     # 4. Symlink executables to lib/<package_name>/
     transitive_runfiles = []
     for exec_target, exec_name in ctx.attr.executables.items():
-        # Get the actual executable file(s)
-        files = exec_target[DefaultInfo].files.to_list()
-
-        # Find the executable file - it's typically the one with execute permission
-        # or matches the target name
-        exec_file = None
-        target_name = exec_target.label.name
-
-        # First try to find a file matching the target name exactly
-        for f in files:
-            if f.basename == target_name:
-                exec_file = f
-                break
-
-        # If not found, take the first file that's likely an executable
-        # (not a .py file that's a shim, not a manifest file)
-        if not exec_file:
-            for f in files:
-                if not f.path.endswith(".py") and not f.path.endswith(".runfiles_manifest"):
-                    exec_file = f
-                    break
+        # Use Bazel's standard API to get the executable file
+        files_to_run = exec_target[DefaultInfo].files_to_run
+        exec_file = files_to_run.executable
 
         if not exec_file:
-            fail("Could not find executable file for target '{}'. Files: {}".format(
-                exec_target.label,
-                [f.path for f in files],
-            ))
+            fail("Target '{}' is not executable".format(exec_target.label))
 
         # Create symlink at lib/<package_name>/<exec_name>
         exec_path = paths.join(
@@ -122,7 +101,7 @@ ros_package = rule(
             mandatory = False,
             default = [],
             allow_files = [".py", ".xml", ".yaml"],
-            doc = "Launch file targets to install in share/<package>/launch/ (e.g., [':my_launch.py'])",
+            doc = "Launch files to install in share/<package>/launch/ (e.g., ['launch/my_app.launch.py'])",
         ),
         "prefix": attr.string(
             default = "ros_package",
@@ -151,16 +130,22 @@ ros_package(
         ":talker_binary": "talker",
         ":listener_binary": "listener",
     },
+    launch_files = ["launch/my_app.launch.py"],
     package_xml = "package.xml",  # Optional
 )
 ```
 
-Then in a launch file:
+Then in the `launch/my_app.launch.py`:
 
 ```python
+from launch import LaunchDescription
 from launch_ros.actions import Node
 
-Node(package='my_ros_package', executable='talker')
+def generate_launch_description():
+    return LaunchDescription([
+      Node(package='my_ros_package', executable='talker'),
+      Node(package='my_ros_package', executable='listener'),
+    ])
 ```
 
 The ros_package target must be included in the launch target's data attribute
